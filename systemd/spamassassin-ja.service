@@ -1,0 +1,43 @@
+[Unit]
+Description=Spamassassin-ja
+Requires=docker.service
+After=network.target
+After=docker.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/sysconfig/spamassassin-ja
+Environment=DOCKER_NAME=littlef/spamassassin-ja:latest
+Environment=VOLUME_NAME=spamassassin
+KillMode=process
+Restart=no
+
+# stdout is logged by only docker syslog driver
+StandardOutput=null
+
+# check environmnts
+ExecStartPre=/bin/sh -c '[ -n "${SPAMD_USER}" ] || (echo "[ERROR] SPAMD_USER is no specified." >&2; exit 1; )'
+ExecStartPre=/bin/sh -c '[ -n "${SOCKET_DIR}" ] || (echo "[ERROR] SOCKET_DIR is no specified." >&2; exit 1; )'
+
+## check user existence
+ExecStartPre=/bin/sh -c 'echo -n "Checking SPAMD_USER (${SPAMD_USER})... "; id "${SPAMD_USER}" > /dev/null && echo "[ OK ]" || exit 1'
+ExecStartPre=/bin/sh -c "/bin/systemctl set-environment HOST_SPAMD_UID=`id -u ${SPAMD_USER}`"
+ExecStartPre=/bin/sh -c "/bin/systemctl set-environment HOST_SPAMD_GID=`id -g ${SPAMD_USER}`"
+
+ExecStartPre=/bin/sh -c "/bin/systemctl set-environment DOCKER_HOST_IP=`ip route | grep ' docker0 ' | awk '{ print $9 }'`"
+
+ExecStart=/usr/bin/docker run --rm \
+  -h %H \
+  --log-driver=syslog \
+  --log-opt syslog-address=udp://${DOCKER_HOST_IP}:514 \
+  --log-opt syslog-facility=mail \
+  --log-opt tag=%n\
+  -e HOST_SPAMD_UID=${HOST_SPAMD_UID} \
+  -e HOST_SPAMD_GID=${HOST_SPAMD_GID} \
+  -v ${SOCKET_DIR}:/var/run/spamd \
+  -v ${VOLUME_NAME}:/mnt/spamassassin:Z \
+  --name=spamassassin ${DOCKER_NAME}
+
+[Install]
+WantedBy=multi-user.target
+
